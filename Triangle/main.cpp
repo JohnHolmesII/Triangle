@@ -72,6 +72,7 @@ class HelloTriangleApplication
 	std::vector<VkImage>     swapChainImages;
 	VkFormat                 swapChainImageFormat;
 	VkExtent2D               swapChainExtent;
+	std::vector<VkImageView> swapChainImageViews;
 
 	struct QueueFamilyIndices
 	{
@@ -109,7 +110,8 @@ class HelloTriangleApplication
 		createSurface();
 		pickPhysicalDevice();
 		createLogicalDevice();
-		createSwapChain(logicalDevice);
+		createSwapChain();
+		createImageViews();
 	}
 
 	void mainLoop()
@@ -125,6 +127,11 @@ class HelloTriangleApplication
 		if (enableValidationLayers)
 		{
 			DestroyDebugUtilsMessengerEXT(instance, callback, nullptr);
+		}
+
+		for (auto imageView : swapChainImageViews)
+		{
+			vkDestroyImageView(logicalDevice, imageView, nullptr);
 		}
 
 		vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
@@ -230,7 +237,7 @@ class HelloTriangleApplication
 		}
 	}
 
-	void createSwapChain(VkDevice device)
+	void createSwapChain()
 	{
 		SwapChainSupportDetails  swapChainSupport     = querySwapChainSupport(physicalDevice);
 		VkSurfaceFormatKHR       surfaceFormat        = chooseSwapSurfaceFormat(swapChainSupport.formats);
@@ -276,14 +283,45 @@ class HelloTriangleApplication
 			createInfo.pQueueFamilyIndices   = nullptr;
 		}
 
-		if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS)
+		if (vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapChain) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create swap chain!");
 		}
 
-		vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr);
+		vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, nullptr);
 		swapChainImages.resize(imageCount);
-		vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.data());
+		vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, swapChainImages.data());
+	}
+
+	void createImageViews()
+	{
+		VkImageViewCreateInfo createInfo = {};
+
+		swapChainImageViews.resize(swapChainImages.size());
+
+		for (size_t i = 0; i < swapChainImages.size(); i++)
+		{
+			createInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			createInfo.image    = swapChainImages[i];
+			createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			createInfo.format   = swapChainImageFormat;
+
+			createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+			createInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+			createInfo.subresourceRange.baseMipLevel   = 0;
+			createInfo.subresourceRange.levelCount     = 1;
+			createInfo.subresourceRange.baseArrayLayer = 0;
+			createInfo.subresourceRange.layerCount     = 1;
+
+			if (vkCreateImageView(logicalDevice, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to create image views!");
+			}
+		}
 	}
 
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
