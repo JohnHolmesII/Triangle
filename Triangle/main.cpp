@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <vector>
 #include <cstring>
@@ -36,7 +37,7 @@ VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMes
 	}
 }
 
-void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT callback, const VkAllocationCallbacks* pAllocator)
+void     DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT callback, const VkAllocationCallbacks* pAllocator)
 {
 	auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
 
@@ -112,6 +113,7 @@ class HelloTriangleApplication
 		createLogicalDevice();
 		createSwapChain();
 		createImageViews();
+		createGraphicsPipeline();
 	}
 
 	void mainLoop()
@@ -324,6 +326,156 @@ class HelloTriangleApplication
 		}
 	}
 
+	void createGraphicsPipeline()
+	{
+		VkPipelineShaderStageCreateInfo fragShaderStageInfo = {};
+		VkPipelineShaderStageCreateInfo vertShaderStageInfo = {};
+		auto                            vertShaderCode      = readFile(R"(C:\Users\God\Programs\Visual Studio\Vulkan Playground\Triangle\Triangle\SPIRV\vert.spv)");
+		auto                            fragShaderCode      = readFile(R"(C:\Users\God\Programs\Visual Studio\Vulkan Playground\Triangle\Triangle\SPIRV\frag.spv)");
+		VkShaderModule                  vertShaderModule;
+		VkShaderModule                  fragShaderModule;
+
+		vertShaderModule = createShaderModule(vertShaderCode);
+		fragShaderModule = createShaderModule(fragShaderCode);
+
+		vertShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		vertShaderStageInfo.stage  = VK_SHADER_STAGE_VERTEX_BIT;
+		vertShaderStageInfo.module = vertShaderModule;
+		vertShaderStageInfo.pName  = "main";
+
+		fragShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		fragShaderStageInfo.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+		fragShaderStageInfo.module = fragShaderModule;
+		fragShaderStageInfo.pName  = "main";
+
+		VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+		vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
+		vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
+	}
+
+	void pickPhysicalDevice()
+	{
+		u32 deviceCount = 0;
+		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+		std::vector<VkPhysicalDevice> devices(deviceCount);
+
+		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+		for (const auto& device : devices)
+		{
+			if (isDeviceSuitable(device))
+			{
+				physicalDevice = device;
+				break;
+			}
+		}
+
+		if (deviceCount == 0 || physicalDevice == VK_NULL_HANDLE)
+		{
+			throw std::runtime_error("failed to find a suitable GPU!");
+		}
+	}
+
+	void setupDebugCallback()
+	{
+		if (enableValidationLayers)
+		{
+			VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
+
+			createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+			createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+			createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+			createInfo.pfnUserCallback = debugCallback;
+
+			if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &callback) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to set up debug callback!");
+			}
+		}
+	}
+
+	bool isDeviceSuitable(VkPhysicalDevice device)
+	{
+		SwapChainSupportDetails swapChainSupport;
+		QueueFamilyIndices      indices = findQueueFamilies(device);
+		bool                    extsSupported = checkDeviceExtensionSupport(device);
+		bool                    swapChainAdequate = false;
+
+		if (extsSupported)
+		{
+			swapChainSupport = querySwapChainSupport(device);
+			swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+		}
+
+		return indices.isComplete() && extsSupported && swapChainAdequate;
+	}
+
+	bool checkValidationLayerSupport()
+	{
+		u32 layerCount;
+		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+		std::vector<VkLayerProperties> availableLayers(layerCount);
+		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+		for (const char* layerName : validationLayers)
+		{
+			bool layerFound = false;
+
+			for (const auto& layerProperties : availableLayers)
+			{
+				if (strcmp(layerName, layerProperties.layerName) == 0)
+				{
+					layerFound = true;
+					break;
+				}
+			}
+
+			if (!layerFound)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool checkDeviceExtensionSupport(VkPhysicalDevice device)
+	{
+		u32 extensionCount;
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+		std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+		for (const auto& extension : availableExtensions)
+		{
+			requiredExtensions.erase(extension.extensionName);
+		}
+
+		return requiredExtensions.empty();
+	}
+
+	VkShaderModule createShaderModule(const std::vector<char>& code)
+	{
+		VkShaderModuleCreateInfo createInfo = {};
+		VkShaderModule           shaderModule;
+
+		createInfo.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		createInfo.codeSize = code.size();
+		createInfo.pCode    = reinterpret_cast<const u32*>(code.data());
+
+		if (vkCreateShaderModule(logicalDevice, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create shader module!");
+		}
+
+		return shaderModule;
+	}
+
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
 	{
 		if (availableFormats.size() == 1 && availableFormats[0].format == VK_FORMAT_UNDEFINED)
@@ -440,60 +592,26 @@ class HelloTriangleApplication
 		return indices;
 	}
 
-	void pickPhysicalDevice()
+	static std::vector<char> readFile(const std::string& filename)
 	{
-		u32 deviceCount = 0;
-		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-		std::vector<VkPhysicalDevice> devices(deviceCount);
+		std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
-		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-		for (const auto& device : devices)
+		if (file.is_open())
 		{
-			if (isDeviceSuitable(device))
-			{
-				physicalDevice = device;
-				break;
-			}
+			size_t            fileSize = (size_t) file.tellg();
+			std::vector<char> buffer(fileSize);
+
+			file.seekg(0);
+			file.read(buffer.data(), fileSize);
+			file.close();
+
+			return buffer;
 		}
-
-		if (deviceCount == 0 || physicalDevice == VK_NULL_HANDLE)
+		else
 		{
-			throw std::runtime_error("failed to find a suitable GPU!");
-		}
-	}
-
-	bool isDeviceSuitable(VkPhysicalDevice device)
-	{
-		SwapChainSupportDetails swapChainSupport;
-		QueueFamilyIndices      indices           = findQueueFamilies(device);
-		bool                    extsSupported     = checkDeviceExtensionSupport(device);
-		bool                    swapChainAdequate = false;
-
-		if (extsSupported)
-		{
-			swapChainSupport  = querySwapChainSupport(device);
-			swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
-		}
-
-		return indices.isComplete() && extsSupported && swapChainAdequate;
-	}
-
-	void setupDebugCallback()
-	{
-		if (enableValidationLayers)
-		{
-			VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
-
-			createInfo.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-			createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-			createInfo.messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-			createInfo.pfnUserCallback = debugCallback;
-
-			if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &callback) != VK_SUCCESS)
-			{
-				throw std::runtime_error("failed to set up debug callback!");
-			}
+			std::cout << "filename is " << filename.data() << '\n';
+			throw std::runtime_error("failed to open file!");
 		}
 	}
 
@@ -510,54 +628,6 @@ class HelloTriangleApplication
 		}
 
 		return extensions;
-	}
-
-	bool checkValidationLayerSupport()
-	{
-		u32 layerCount;
-		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-
-		std::vector<VkLayerProperties> availableLayers(layerCount);
-		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
-
-		for (const char* layerName : validationLayers)
-		{
-			bool layerFound = false;
-
-			for (const auto& layerProperties : availableLayers)
-			{
-				if (strcmp(layerName, layerProperties.layerName) == 0)
-				{
-					layerFound = true;
-					break;
-				}
-			}
-
-			if (!layerFound)
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	bool checkDeviceExtensionSupport(VkPhysicalDevice device)
-	{
-		u32 extensionCount;
-		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-
-		std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
-
-		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
-
-		for (const auto& extension : availableExtensions)
-		{
-			requiredExtensions.erase(extension.extensionName);
-		}
-
-		return requiredExtensions.empty();
 	}
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT      messageSeverity,
