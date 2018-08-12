@@ -60,6 +60,17 @@ class HelloTriangleApplication
 	GLFWwindow*              window;
 	VkInstance               instance;
 	VkDebugUtilsMessengerEXT callback;
+	VkPhysicalDevice         physicalDevice = VK_NULL_HANDLE;
+
+	struct QueueFamilyIndices
+	{
+		int graphicsFamily = -1;
+
+		bool isComplete()
+		{
+			return graphicsFamily >= 0;
+		}
+	};
 
 	void initWindow()
 	{
@@ -75,6 +86,7 @@ class HelloTriangleApplication
 	{
 		createInstance();
 		setupDebugCallback();
+		pickPhysicalDevice();
 	}
 
 	void mainLoop()
@@ -134,6 +146,70 @@ class HelloTriangleApplication
 		{
 			throw std::runtime_error("failed to create instance!");
 		}
+	}
+
+	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
+	{
+		QueueFamilyIndices indices;
+		u32                queueFamilyCount = 0;
+
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+		std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+		int i = 0;
+		for (const auto& queueFamily : queueFamilies)
+		{
+			if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+			{
+				indices.graphicsFamily = i;
+			}
+
+			if (indices.isComplete())
+			{
+				break;
+			}
+
+			i++;
+		}
+
+		return indices;
+	}
+
+	void pickPhysicalDevice()
+	{
+		u32 deviceCount = 0;
+		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+		std::vector<VkPhysicalDevice> devices(deviceCount);
+
+		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+		for (const auto& device : devices)
+		{
+			if (isDeviceSuitable(device))
+			{
+				physicalDevice = device;
+				break;
+			}
+		}
+
+		if (deviceCount == 0 || physicalDevice == VK_NULL_HANDLE)
+		{
+			throw std::runtime_error("failed to find a suitable GPU!");
+		}
+	}
+
+	bool isDeviceSuitable(VkPhysicalDevice device)
+	{
+		VkPhysicalDeviceProperties deviceProperties;
+		VkPhysicalDeviceFeatures   deviceFeatures;
+		QueueFamilyIndices         indices = findQueueFamilies(device);
+
+		vkGetPhysicalDeviceProperties(device, &deviceProperties);
+		vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+		return indices.isComplete();
 	}
 
 	void setupDebugCallback()
