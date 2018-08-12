@@ -19,6 +19,7 @@ typedef uint32_t u32;
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const std::vector<const char*> validationLayers = {"VK_LAYER_LUNARG_standard_validation"};
+const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pCallback)
 {
@@ -62,7 +63,7 @@ class HelloTriangleApplication
 	VkInstance               instance;
 	VkDebugUtilsMessengerEXT callback;
 	VkPhysicalDevice         physicalDevice = VK_NULL_HANDLE;
-	VkDevice                 device;
+	VkDevice                 logicalDevice;
 	VkQueue                  graphicsQueue;
 	VkQueue                  presentQueue;
 	VkSurfaceKHR             surface;
@@ -77,6 +78,13 @@ class HelloTriangleApplication
 			return graphicsFamily >= 0 &&
 				   presentFamily  >= 0;
 		}
+	};
+
+	struct SwapChainSupportDetails
+	{
+		VkSurfaceCapabilitiesKHR        capabilities;
+		std::vector<VkSurfaceFormatKHR> formats;
+		std::vector<VkPresentModeKHR>   presentModes;
 	};
 
 	void initWindow()
@@ -113,7 +121,7 @@ class HelloTriangleApplication
 			DestroyDebugUtilsMessengerEXT(instance, callback, nullptr);
 		}
 
-		vkDestroyDevice(device, nullptr);
+		vkDestroyDevice(logicalDevice, nullptr);
 		vkDestroySurfaceKHR(instance, surface, nullptr);
 		vkDestroyInstance(instance, nullptr);
 		glfwDestroyWindow(window);
@@ -181,15 +189,16 @@ class HelloTriangleApplication
 			queueCreateInfos.push_back(queueCreateInfo);
 		}
 
-		createInfo.sType                 = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-		createInfo.queueCreateInfoCount  = static_cast<u32>(queueCreateInfos.size());
-		createInfo.pQueueCreateInfos     = queueCreateInfos.data();
-		createInfo.pEnabledFeatures      = &deviceFeatures;
-		createInfo.enabledExtensionCount = 0;
+		createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+		createInfo.queueCreateInfoCount    = static_cast<u32>(queueCreateInfos.size());
+		createInfo.pQueueCreateInfos       = queueCreateInfos.data();
+		createInfo.pEnabledFeatures        = &deviceFeatures;
+		createInfo.enabledExtensionCount   = static_cast<u32>(deviceExtensions.size());
+		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 		if (enableValidationLayers)
 		{
-			createInfo.enabledLayerCount = static_cast<u32>(validationLayers.size());
+			createInfo.enabledLayerCount   = static_cast<u32>(validationLayers.size());
 			createInfo.ppEnabledLayerNames = validationLayers.data();
 		}
 		else
@@ -197,13 +206,13 @@ class HelloTriangleApplication
 			createInfo.enabledLayerCount = 0;
 		}
 
-		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
+		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create logical device!");
 		}
 
-		vkGetDeviceQueue(device, indices.graphicsFamily, 0, &graphicsQueue);
-		vkGetDeviceQueue(device, indices.presentFamily, 0, &presentQueue);
+		vkGetDeviceQueue(logicalDevice, indices.graphicsFamily, 0, &graphicsQueue);
+		vkGetDeviceQueue(logicalDevice, indices.presentFamily, 0, &presentQueue);
 	}
 
 	void createSurface()
@@ -212,6 +221,31 @@ class HelloTriangleApplication
 		{
 			throw std::runtime_error("failed to create window surface!");
 		}
+	}
+
+	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device)
+	{
+		SwapChainSupportDetails details;
+		u32                     formatCount;
+		u32                     presentModeCount;
+
+		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
+
+		if (formatCount != 0)
+		{
+			details.formats.resize(formatCount);
+			vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
+		}
+
+		if (presentModeCount != 0)
+		{
+			details.presentModes.resize(presentModeCount);
+			vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
+		}
+
+		return details;
 	}
 
 	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
@@ -278,14 +312,18 @@ class HelloTriangleApplication
 
 	bool isDeviceSuitable(VkPhysicalDevice device)
 	{
-		VkPhysicalDeviceProperties deviceProperties;
-		VkPhysicalDeviceFeatures   deviceFeatures;
-		QueueFamilyIndices         indices = findQueueFamilies(device);
+		SwapChainSupportDetails swapChainSupport;
+		QueueFamilyIndices      indices           = findQueueFamilies(device);
+		bool                    extsSupported     = checkDeviceExtensionSupport(device);
+		bool                    swapChainAdequate = false;
 
-		vkGetPhysicalDeviceProperties(device, &deviceProperties);
-		vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+		if (extsSupported)
+		{
+			swapChainSupport  = querySwapChainSupport(device);
+			swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+		}
 
-		return indices.isComplete();
+		return indices.isComplete() && extsSupported && swapChainAdequate;
 	}
 
 	void setupDebugCallback()
@@ -349,6 +387,24 @@ class HelloTriangleApplication
 		}
 
 		return true;
+	}
+
+	bool checkDeviceExtensionSupport(VkPhysicalDevice device)
+	{
+		u32 extensionCount;
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+		std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+		for (const auto& extension : availableExtensions)
+		{
+			requiredExtensions.erase(extension.extensionName);
+		}
+
+		return requiredExtensions.empty();
 	}
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT      messageSeverity,
