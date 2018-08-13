@@ -61,22 +61,25 @@ class HelloTriangleApplication
 
 	private:
 
-	GLFWwindow*              window;
-	VkInstance               instance;
-	VkDebugUtilsMessengerEXT callback;
-	VkPhysicalDevice         physicalDevice = VK_NULL_HANDLE;
-	VkDevice                 logicalDevice;
-	VkQueue                  graphicsQueue;
-	VkQueue                  presentQueue;
-	VkSurfaceKHR             surface;
-	VkSwapchainKHR           swapChain;
-	std::vector<VkImage>     swapChainImages;
-	VkFormat                 swapChainImageFormat;
-	VkExtent2D               swapChainExtent;
-	std::vector<VkImageView> swapChainImageViews;
-	VkRenderPass             renderPass;
-	VkPipelineLayout         pipelineLayout;
-	VkPipeline               graphicsPipeline;
+	GLFWwindow*                  window;
+	VkInstance                   instance;
+	VkDebugUtilsMessengerEXT     callback;
+	VkPhysicalDevice             physicalDevice = VK_NULL_HANDLE;
+	VkDevice                     logicalDevice;
+	VkQueue                      graphicsQueue;
+	VkQueue                      presentQueue;
+	VkSurfaceKHR                 surface;
+	VkSwapchainKHR               swapChain;
+	std::vector<VkImage>         swapChainImages;
+	VkFormat                     swapChainImageFormat;
+	VkExtent2D                   swapChainExtent;
+	std::vector<VkImageView>     swapChainImageViews;
+	VkRenderPass                 renderPass;
+	VkPipelineLayout             pipelineLayout;
+	VkPipeline                   graphicsPipeline;
+	std::vector<VkFramebuffer>   swapChainFramebuffers;
+	VkCommandPool                commandPool;
+	std::vector<VkCommandBuffer> commandBuffers;
 
 	struct QueueFamilyIndices
 	{
@@ -118,6 +121,9 @@ class HelloTriangleApplication
 		createImageViews();
 		createRenderPass();
 		createGraphicsPipeline();
+		createFramebuffers();
+		createCommandPool();
+		createCommandBuffers();
 	}
 
 	void mainLoop()
@@ -133,6 +139,13 @@ class HelloTriangleApplication
 		if (enableValidationLayers)
 		{
 			DestroyDebugUtilsMessengerEXT(instance, callback, nullptr);
+		}
+
+		vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
+
+		for (auto framebuffer : swapChainFramebuffers)
+		{
+			vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
 		}
 
 		vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
@@ -510,6 +523,99 @@ class HelloTriangleApplication
 
 		vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
 		vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
+	}
+
+	void createFramebuffers()
+	{
+		VkFramebufferCreateInfo framebufferInfo = {};
+
+		swapChainFramebuffers.resize(swapChainImageViews.size());
+
+		for (size_t i = 0; i < swapChainImageViews.size(); i++)
+		{
+			VkImageView attachments[] = {swapChainImageViews[i]};
+
+			framebufferInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+			framebufferInfo.renderPass      = renderPass;
+			framebufferInfo.attachmentCount = 1;
+			framebufferInfo.pAttachments    = attachments;
+			framebufferInfo.width           = swapChainExtent.width;
+			framebufferInfo.height          = swapChainExtent.height;
+			framebufferInfo.layers          = 1;
+
+			if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to create framebuffer!");
+			}
+		}
+	}
+
+	void createCommandPool()
+	{
+		QueueFamilyIndices      queueFamilyIndices = findQueueFamilies(physicalDevice);
+		VkCommandPoolCreateInfo poolInfo           = {};
+
+		poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily;
+		poolInfo.flags            = 0;
+
+		if (vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create command pool!");
+		}
+	}
+
+	void createCommandBuffers()
+	{
+		VkCommandBufferAllocateInfo allocInfo      = {};
+		VkCommandBufferBeginInfo    beginInfo      = {};
+		VkRenderPassBeginInfo       renderPassInfo = {};
+		VkClearValue                clearColor;
+
+		commandBuffers.resize(swapChainFramebuffers.size());
+
+		allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.commandPool        = commandPool;
+		allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandBufferCount = (u32) commandBuffers.size();
+
+		if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, commandBuffers.data()) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to allocate command buffers!");
+		}
+
+		for (size_t i = 0; i < commandBuffers.size(); i++)
+		{
+			beginInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+			beginInfo.flags            = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+			beginInfo.pInheritanceInfo = nullptr;
+
+			renderPassInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			renderPassInfo.renderPass  = renderPass;
+			renderPassInfo.framebuffer = swapChainFramebuffers[i];
+
+			renderPassInfo.renderArea.offset = {0, 0};
+			renderPassInfo.renderArea.extent = swapChainExtent;
+
+			clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
+			renderPassInfo.clearValueCount = 1;
+			renderPassInfo.pClearValues = &clearColor;
+
+			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to begin recording command buffer!");
+			}
+
+			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+			vkCmdDraw(commandBuffers[i], 3, 1, 0, 0); // Le triangle
+			vkCmdEndRenderPass(commandBuffers[i]);
+
+			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to record command buffer!");
+			}
+		}
 	}
 
 	void pickPhysicalDevice()
