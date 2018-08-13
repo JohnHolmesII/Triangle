@@ -1,6 +1,6 @@
 #define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
 
+#include <GLFW/glfw3.h>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -16,12 +16,17 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
-typedef uint32_t u32;
+#define vec std::vector
 
-const int WIDTH = 800;
-const int HEIGHT = 600;
-const std::vector<const char*> validationLayers = {"VK_LAYER_LUNARG_standard_validation"};
-const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+typedef uint32_t    u32;
+typedef uint64_t    u64;
+typedef const char* cstr;
+
+const int       WIDTH                = 800;
+const int       HEIGHT               = 600;
+const int       MAX_FRAMES_IN_FLIGHT = 2;
+const vec<cstr> validationLayers     = {"VK_LAYER_LUNARG_standard_validation"};
+const vec<cstr> deviceExtensions     = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pCallback)
 {
@@ -61,25 +66,29 @@ class HelloTriangleApplication
 
 	private:
 
-	GLFWwindow*                  window;
-	VkInstance                   instance;
-	VkDebugUtilsMessengerEXT     callback;
-	VkPhysicalDevice             physicalDevice = VK_NULL_HANDLE;
-	VkDevice                     logicalDevice;
-	VkQueue                      graphicsQueue;
-	VkQueue                      presentQueue;
-	VkSurfaceKHR                 surface;
-	VkSwapchainKHR               swapChain;
-	std::vector<VkImage>         swapChainImages;
-	VkFormat                     swapChainImageFormat;
-	VkExtent2D                   swapChainExtent;
-	std::vector<VkImageView>     swapChainImageViews;
-	VkRenderPass                 renderPass;
-	VkPipelineLayout             pipelineLayout;
-	VkPipeline                   graphicsPipeline;
-	std::vector<VkFramebuffer>   swapChainFramebuffers;
-	VkCommandPool                commandPool;
-	std::vector<VkCommandBuffer> commandBuffers;
+	GLFWwindow*              window;
+	VkInstance               instance;
+	VkDebugUtilsMessengerEXT callback;
+	size_t                   currentFrame   = 0;
+	VkPhysicalDevice         physicalDevice = VK_NULL_HANDLE;
+	VkDevice                 logicalDevice;
+	VkQueue                  graphicsQueue;
+	VkQueue                  presentQueue;
+	VkSurfaceKHR             surface;
+	VkSwapchainKHR           swapChain;
+	vec<VkImage>             swapChainImages;
+	VkFormat                 swapChainImageFormat;
+	VkExtent2D               swapChainExtent;
+	vec<VkImageView>         swapChainImageViews;
+	VkRenderPass             renderPass;
+	VkPipelineLayout         pipelineLayout;
+	VkPipeline               graphicsPipeline;
+	vec<VkFramebuffer>       swapChainFramebuffers;
+	VkCommandPool            commandPool;
+	vec<VkCommandBuffer>     commandBuffers;
+	vec<VkSemaphore>         imageAvailableSemaphores;
+	vec<VkSemaphore>         renderFinishedSemaphores;
+	vec<VkFence>             inFlightFences;
 
 	struct QueueFamilyIndices
 	{
@@ -95,9 +104,9 @@ class HelloTriangleApplication
 
 	struct SwapChainSupportDetails
 	{
-		VkSurfaceCapabilitiesKHR        capabilities;
-		std::vector<VkSurfaceFormatKHR> formats;
-		std::vector<VkPresentModeKHR>   presentModes;
+		VkSurfaceCapabilitiesKHR capabilities;
+		vec<VkSurfaceFormatKHR>  formats;
+		vec<VkPresentModeKHR>    presentModes;
 	};
 
 	void initWindow()
@@ -124,6 +133,7 @@ class HelloTriangleApplication
 		createFramebuffers();
 		createCommandPool();
 		createCommandBuffers();
+		createSyncObjects();
 	}
 
 	void mainLoop()
@@ -131,7 +141,10 @@ class HelloTriangleApplication
 		while (!glfwWindowShouldClose(window))
 		{
 			glfwPollEvents();
+			drawFrame();
 		}
+
+		vkDeviceWaitIdle(logicalDevice);
 	}
 
 	void cleanup()
@@ -139,6 +152,13 @@ class HelloTriangleApplication
 		if (enableValidationLayers)
 		{
 			DestroyDebugUtilsMessengerEXT(instance, callback, nullptr);
+		}
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], nullptr);
+			vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], nullptr);
+			vkDestroyFence(logicalDevice, inFlightFences[i], nullptr);
 		}
 
 		vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
@@ -163,6 +183,47 @@ class HelloTriangleApplication
 		vkDestroyInstance(instance, nullptr);
 		glfwDestroyWindow(window);
 		glfwTerminate();
+	}
+
+	void drawFrame()
+	{
+		u32 imageIndex;
+
+		vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, std::numeric_limits<uint64_t>::max());
+		vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
+		vkAcquireNextImageKHR(logicalDevice, swapChain, std::numeric_limits<u64>::max(), imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+		VkSubmitInfo         submitInfo         = {};
+		VkSemaphore          waitSemaphores[]   = {imageAvailableSemaphores[currentFrame]};
+		VkSemaphore          signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
+		VkPresentInfoKHR     presentInfo        = {};
+		VkSwapchainKHR       swapChains[]       = {swapChain};
+		VkPipelineStageFlags waitStages[]       = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+		submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.waitSemaphoreCount   = 1;
+		submitInfo.pWaitSemaphores      = waitSemaphores;
+		submitInfo.pWaitDstStageMask    = waitStages;
+		submitInfo.commandBufferCount   = 1;
+		submitInfo.pCommandBuffers      = &commandBuffers[imageIndex];
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores    = signalSemaphores;
+
+		presentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores    = signalSemaphores;
+		presentInfo.swapchainCount     = 1;
+		presentInfo.pSwapchains        = swapChains;
+		presentInfo.pImageIndices      = &imageIndex;
+		presentInfo.pResults           = nullptr;
+
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to submit draw command buffer!");
+		}
+
+		vkQueuePresentKHR(presentQueue, &presentInfo);
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
 	void createInstance()
@@ -206,22 +267,22 @@ class HelloTriangleApplication
 
 	void createLogicalDevice()
 	{
-		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-		QueueFamilyIndices                   indices             = findQueueFamilies(physicalDevice);
-		std::set<int>                        uniqueQueueFamilies = {indices.graphicsFamily, indices.presentFamily};
-		VkPhysicalDeviceFeatures             deviceFeatures      = {};
-		VkDeviceCreateInfo                   createInfo          = {};
-		float                                queuePriority       = 1.0f;
+		vec<VkDeviceQueueCreateInfo> queueCreateInfos;
+		QueueFamilyIndices           indices             = findQueueFamilies(physicalDevice);
+		std::set<int>                uniqueQueueFamilies = {indices.graphicsFamily, indices.presentFamily};
+		VkPhysicalDeviceFeatures     deviceFeatures      = {};
+		VkDeviceCreateInfo           createInfo          = {};
+		float                        queuePriority       = 1.0f;
 
 
 		for (int queueFamily : uniqueQueueFamilies)
 		{
 			VkDeviceQueueCreateInfo queueCreateInfo = {};
 
-			queueCreateInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-			queueCreateInfo.queueFamilyIndex        = queueFamily;
-			queueCreateInfo.queueCount              = 1;
-			queueCreateInfo.pQueuePriorities        = &queuePriority;
+			queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueCreateInfo.queueFamilyIndex = queueFamily;
+			queueCreateInfo.queueCount       = 1;
+			queueCreateInfo.pQueuePriorities = &queuePriority;
 
 			queueCreateInfos.push_back(queueCreateInfo);
 		}
@@ -353,6 +414,7 @@ class HelloTriangleApplication
 		VkAttachmentReference   colorAttachmentRef = {};
 		VkSubpassDescription    subpass            = {};
 		VkRenderPassCreateInfo  renderPassInfo     = {};
+		VkSubpassDependency     dependency         = {};
 
 		colorAttachment.format         = swapChainImageFormat;
 		colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
@@ -370,11 +432,20 @@ class HelloTriangleApplication
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments    = &colorAttachmentRef;
 
+		dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass    = 0;
+		dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
 		renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 		renderPassInfo.attachmentCount = 1;
 		renderPassInfo.pAttachments    = &colorAttachment;
 		renderPassInfo.subpassCount    = 1;
 		renderPassInfo.pSubpasses      = &subpass;
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies   = &dependency;
 
 		if (vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
 		{
@@ -618,11 +689,36 @@ class HelloTriangleApplication
 		}
 	}
 
+	void createSyncObjects()
+	{
+		VkSemaphoreCreateInfo semaphoreInfo = {};
+		VkFenceCreateInfo     fenceInfo     = {};
+
+		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+				vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+				vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to create synchronization objects for a frame!");
+			}
+		}
+	}
+
 	void pickPhysicalDevice()
 	{
 		u32 deviceCount = 0;
 		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-		std::vector<VkPhysicalDevice> devices(deviceCount);
+		vec<VkPhysicalDevice> devices(deviceCount);
 
 		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
@@ -680,7 +776,7 @@ class HelloTriangleApplication
 		u32 layerCount;
 		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 
-		std::vector<VkLayerProperties> availableLayers(layerCount);
+		vec<VkLayerProperties> availableLayers(layerCount);
 		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
 		for (const char* layerName : validationLayers)
@@ -710,7 +806,7 @@ class HelloTriangleApplication
 		u32 extensionCount;
 		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
-		std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+		vec<VkExtensionProperties> availableExtensions(extensionCount);
 		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
 
 		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
@@ -723,7 +819,7 @@ class HelloTriangleApplication
 		return requiredExtensions.empty();
 	}
 
-	VkShaderModule createShaderModule(const std::vector<char>& code)
+	VkShaderModule createShaderModule(const vec<char>& code)
 	{
 		VkShaderModuleCreateInfo createInfo = {};
 		VkShaderModule           shaderModule;
@@ -740,7 +836,7 @@ class HelloTriangleApplication
 		return shaderModule;
 	}
 
-	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
+	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const vec<VkSurfaceFormatKHR>& availableFormats)
 	{
 		if (availableFormats.size() == 1 && availableFormats[0].format == VK_FORMAT_UNDEFINED)
 		{
@@ -758,7 +854,7 @@ class HelloTriangleApplication
 		return availableFormats[0];
 	}
 
-	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR> availablePresentModes)
+	VkPresentModeKHR chooseSwapPresentMode(const vec<VkPresentModeKHR> availablePresentModes)
 	{
 		for (const auto& availablePresentMode : availablePresentModes)
 		{
@@ -825,7 +921,7 @@ class HelloTriangleApplication
 
 		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
 
-		std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+		vec<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
 		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
 		int i = 0;
@@ -856,15 +952,15 @@ class HelloTriangleApplication
 		return indices;
 	}
 
-	static std::vector<char> readFile(const std::string& filename)
+	static vec<char> readFile(const std::string& filename)
 	{
 		std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
 
 		if (file.is_open())
 		{
-			size_t            fileSize = (size_t) file.tellg();
-			std::vector<char> buffer(fileSize);
+			size_t    fileSize = (size_t) file.tellg();
+			vec<char> buffer(fileSize);
 
 			file.seekg(0);
 			file.read(buffer.data(), fileSize);
@@ -879,12 +975,12 @@ class HelloTriangleApplication
 		}
 	}
 
-	std::vector<const char*> getRequiredExtensions()
+	vec<cstr> getRequiredExtensions()
 	{
-		u32          glfwExtensionCount = 0;
-		const char** glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		u32   glfwExtensionCount = 0;
+		cstr* glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-		std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		vec<cstr> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 
 		if (enableValidationLayers)
 		{
