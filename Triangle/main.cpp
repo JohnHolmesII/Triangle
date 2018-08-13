@@ -76,6 +76,7 @@ class HelloTriangleApplication
 	std::vector<VkImageView> swapChainImageViews;
 	VkRenderPass             renderPass;
 	VkPipelineLayout         pipelineLayout;
+	VkPipeline               graphicsPipeline;
 
 	struct QueueFamilyIndices
 	{
@@ -134,6 +135,7 @@ class HelloTriangleApplication
 			DestroyDebugUtilsMessengerEXT(instance, callback, nullptr);
 		}
 
+		vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
 		vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
 
@@ -382,11 +384,12 @@ class HelloTriangleApplication
 		VkPipelineVertexInputStateCreateInfo   vertexInputInfo      = {};
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly        = {};
 		VkPipelineViewportStateCreateInfo      viewportState        = {};
-		VkShaderModule                         vertShaderModule;
-		VkShaderModule                         fragShaderModule;
 		VkDynamicState                         dynamicStates[]      = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_LINE_WIDTH};
 		VkPipelineDynamicStateCreateInfo       dynamicState         = {};
 		VkPipelineLayoutCreateInfo             pipelineLayoutInfo   = {};
+		VkGraphicsPipelineCreateInfo           pipelineInfo         = {};
+		VkShaderModule                         vertShaderModule;
+		VkShaderModule                         fragShaderModule;
 
 		vertShaderModule = createShaderModule(vertShaderCode);
 		fragShaderModule = createShaderModule(fragShaderCode);
@@ -400,6 +403,8 @@ class HelloTriangleApplication
 		fragShaderStageInfo.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
 		fragShaderStageInfo.module = fragShaderModule;
 		fragShaderStageInfo.pName  = "main";
+
+		VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
 		vertexInputInfo.sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vertexInputInfo.vertexBindingDescriptionCount   = 0;
@@ -481,7 +486,27 @@ class HelloTriangleApplication
 			throw std::runtime_error("failed to create pipeline layout!");
 		}
 
-		VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+		pipelineInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount          = 2;
+		pipelineInfo.pStages             = shaderStages;
+		pipelineInfo.pVertexInputState   = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState      = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState   = &multisampling;
+		pipelineInfo.pDepthStencilState  = nullptr;
+		pipelineInfo.pColorBlendState    = &colorBlending;
+		pipelineInfo.pDynamicState       = nullptr;
+		pipelineInfo.layout              = pipelineLayout;
+		pipelineInfo.renderPass          = renderPass;
+		pipelineInfo.subpass             = 0;
+		pipelineInfo.basePipelineHandle  = VK_NULL_HANDLE;
+		pipelineInfo.basePipelineIndex   = -1;
+
+		if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create graphics pipeline!");
+		}
 
 		vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
 		vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
